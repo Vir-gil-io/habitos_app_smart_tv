@@ -3,5 +3,22 @@
          the Flutter tool needs it to communicate with the running application
          to allow setting breakpoints, to provide hot reload, etc.
     -->
+    <!-- Requiere leanback (interfaz de Android TV) -->
+    <uses-feature
+        android:name="android.software.leanback"
+        android:required="true" />
+
+    <!-- Un TV no tiene pantalla táctil; no lo hagas requisito -->
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
+
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- LEANBACK_LAUNCHER: para que aparezca en la pantalla
+                 principal de Android TV como una app real -->
+    <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>
+    </intent-filter>
 </manifest>
