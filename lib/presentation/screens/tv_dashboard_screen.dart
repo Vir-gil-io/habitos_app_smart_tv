@@ -111,36 +111,38 @@ class _TvDashboardBody extends ConsumerWidget {
         children: [
           Expanded(
             flex: 2,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                profileAsync.when(
-                  data: (p) => _StatCard(
-                    icon: '🔥',
-                    title: 'RACHA',
-                    value: '${p.globalStreakDays}',
-                    subtitle: 'Días consecutivos',
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  profileAsync.when(
+                    data: (p) => _StatCard(
+                      icon: '🔥',
+                      title: 'RACHA',
+                      value: '${p.globalStreakDays}',
+                      subtitle: 'Días consecutivos',
+                    ),
+                    loading: () => const _LoadingCard(),
+                    error: (_, __) =>
+                        const _StatCard(icon: '🔥', title: 'RACHA', value: '—', subtitle: ''),
                   ),
-                  loading: () => const _LoadingCard(),
-                  error: (_, __) =>
-                      const _StatCard(icon: '🔥', title: 'RACHA', value: '—', subtitle: ''),
-                ),
-                const SizedBox(height: 24),
-                habitsAsync.when(
-                  data: (habits) {
-                    final completed = habits.where((h) => h.isCompleted).length;
-                    final total = habits.length;
-                    final pct = total == 0 ? 0.0 : completed / total;
-                    return _GaugeCard(
-                      title: 'ACTIVIDADES COMPLETADAS',
-                      percent: pct,
-                      label: '$completed de $total hábitos',
-                    );
-                  },
-                  loading: () => const _LoadingCard(),
-                  error: (_, __) => const SizedBox.shrink(),
-                ),
-              ],
+                  const SizedBox(height: 16),
+                  habitsAsync.when(
+                    data: (habits) {
+                      final completed = habits.where((h) => h.isCompleted).length;
+                      final total = habits.length;
+                      final pct = total == 0 ? 0.0 : completed / total;
+                      return _GaugeCard(
+                        title: 'ACTIVIDADES COMPLETADAS',
+                        percent: pct,
+                        label: '$completed de $total hábitos',
+                      );
+                    },
+                    loading: () => const _LoadingCard(),
+                    error: (_, __) => const SizedBox.shrink(),
+                  ),
+                ],
+              ),
             ),
           ),
           const SizedBox(width: 32),
@@ -215,20 +217,30 @@ class _GaugeCard extends StatelessWidget {
           const SizedBox(height: 12),
           Center(
             child: SizedBox(
-              width: 140,
-              height: 140,
+              width: 160,
+              height: 160,
               child: Stack(alignment: Alignment.center, children: [
                 TweenAnimationBuilder<double>(
                   tween: Tween(begin: 0, end: percent),
                   duration: const Duration(milliseconds: 700),
-                  builder: (context, value, _) => CircularProgressIndicator(
-                    value: value,
-                    strokeWidth: 10,
-                    backgroundColor: AppTheme.divider,
-                    valueColor: const AlwaysStoppedAnimation(AppTheme.completed),
+                  builder: (context, value, _) => SizedBox(
+                    width: 160,
+                    height: 160,
+                    child: CircularProgressIndicator(
+                      value: value,
+                      strokeWidth: 12,
+                      backgroundColor: AppTheme.divider,
+                      valueColor: const AlwaysStoppedAnimation(AppTheme.completed),
+                    ),
                   ),
                 ),
-                Text('${(percent * 100).toInt()}%', style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    '${(percent * 100).toInt()}%',
+                    style: const TextStyle(fontSize: 30, fontWeight: FontWeight.bold),
+                  ),
+                ),
               ]),
             ),
           ),
@@ -242,13 +254,43 @@ class _GaugeCard extends StatelessWidget {
 
 class _StepsCard extends StatelessWidget {
   final TvActivitySummary activity;
+  static const int dailyGoal = 5000; // meta diaria de referencia
+
   const _StepsCard({required this.activity});
+
+  /// Completa los 7 días de la semana (lunes a domingo) con 0 pasos
+  /// en los días sin registro, para que la gráfica siempre muestre
+  /// la semana completa en vez de solo los días con datos.
+  List<TvDailyActivity> _fullWeek() {
+    final now = DateTime.now();
+    final monday = now.subtract(Duration(days: now.weekday - 1));
+    final byDate = {
+      for (final d in activity.dailySteps)
+        DateTime(d.date.year, d.date.month, d.date.day): d.steps,
+    };
+
+    return List.generate(7, (i) {
+      final day = DateTime(monday.year, monday.month, monday.day + i);
+      return TvDailyActivity(date: day, steps: byDate[day] ?? 0);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    final maxSteps = activity.dailySteps.isEmpty
-        ? 1
-        : activity.dailySteps.map((d) => d.steps).reduce((a, b) => a > b ? a : b);
+    final week = _fullWeek();
+    final stepsValues = week.map((d) => d.steps).toList();
+    final maxRecorded = stepsValues.isEmpty
+        ? 0
+        : stepsValues.reduce((a, b) => a > b ? a : b);
+    final chartMax = maxRecorded > dailyGoal ? maxRecorded : dailyGoal;
+
+    final daysWithData = stepsValues.where((s) => s > 0).length;
+    final average = daysWithData == 0
+        ? 0
+        : (stepsValues.reduce((a, b) => a + b) / daysWithData).round();
+    final bestDayIndex = stepsValues.isEmpty
+        ? -1
+        : stepsValues.indexOf(maxRecorded);
 
     return Container(
       width: double.infinity,
@@ -261,44 +303,116 @@ class _StepsCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('PASOS DE LA SEMANA', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1)),
-          const SizedBox(height: 4),
-          Text('${activity.weekSteps} pasos totales', style: Theme.of(context).textTheme.bodyMedium),
-          const SizedBox(height: 20),
-          if (activity.dailySteps.isEmpty)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('PASOS DE LA SEMANA',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1)),
+                  const SizedBox(height: 4),
+                  Text('${activity.weekSteps} pasos totales',
+                      style: Theme.of(context).textTheme.bodyMedium),
+                ],
+              ),
+              if (activity.weekSteps > 0)
+                Row(
+                  children: [
+                    _MiniMetric(label: 'Promedio/día', value: '$average'),
+                    const SizedBox(width: 16),
+                    _MiniMetric(
+                      label: 'Mejor día',
+                      value: bestDayIndex >= 0 ? _weekdayFullLabel(week[bestDayIndex].date.weekday) : '—',
+                    ),
+                  ],
+                ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          if (activity.weekSteps == 0)
             const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: Text('Sin datos del wearable esta semana', style: TextStyle(color: AppTheme.textSecondary)),
+              padding: EdgeInsets.symmetric(vertical: 40),
+              child: Center(
+                child: Text('Sin datos del wearable esta semana',
+                    style: TextStyle(color: AppTheme.textSecondary)),
+              ),
             )
           else
             SizedBox(
-              height: 140,
+              height: 180,
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: activity.dailySteps.map((d) {
-                  final heightFactor = maxSteps == 0 ? 0.0 : d.steps / maxSteps;
+                children: week.map((d) {
+                  final heightFactor = chartMax == 0 ? 0.0 : d.steps / chartMax;
+                  final now = DateTime.now();
+                  final isToday = d.date.year == now.year &&
+                      d.date.month == now.month &&
+                      d.date.day == now.day;
+
                   return Column(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
-                      Text('${d.steps}', style: const TextStyle(fontSize: 10)),
+                      Text(
+                        d.steps > 0 ? '${d.steps}' : '',
+                        style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary),
+                      ),
                       const SizedBox(height: 4),
-                      TweenAnimationBuilder<double>(
-                        tween: Tween(begin: 0, end: heightFactor),
-                        duration: const Duration(milliseconds: 700),
-                        builder: (context, value, _) => Container(
-                          width: 24,
-                          height: 90 * value,
-                          decoration: BoxDecoration(color: AppTheme.completed, borderRadius: BorderRadius.circular(6)),
-                        ),
+                      Stack(
+                        alignment: Alignment.bottomCenter,
+                        children: [
+                          // Marca de referencia de la meta diaria
+                          Container(
+                            width: 28,
+                            height: 130,
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                color: AppTheme.divider,
+                                width: 1,
+                              ),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                          ),
+                          TweenAnimationBuilder<double>(
+                            tween: Tween(begin: 0, end: heightFactor.clamp(0.0, 1.0)),
+                            duration: const Duration(milliseconds: 700),
+                            builder: (context, value, _) => Container(
+                              width: 24,
+                              height: 128 * value,
+                              margin: const EdgeInsets.only(bottom: 1),
+                              decoration: BoxDecoration(
+                                color: d.steps >= dailyGoal
+                                    ? AppTheme.completed
+                                    : (isToday ? AppTheme.primary : AppTheme.primaryLight),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 6),
-                      Text(_weekdayLabel(d.date.weekday), style: const TextStyle(fontSize: 10)),
+                      Text(
+                        _weekdayLabel(d.date.weekday),
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: isToday ? FontWeight.bold : FontWeight.normal,
+                          color: isToday ? AppTheme.primary : null,
+                        ),
+                      ),
                     ],
                   );
                 }).toList(),
               ),
             ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              _LegendDot(color: AppTheme.primaryLight, label: 'Bajo la meta'),
+              const SizedBox(width: 16),
+              _LegendDot(color: AppTheme.completed, label: 'Meta alcanzada (${dailyGoal ~/ 1000}k)'),
+            ],
+          ),
         ],
       ),
     );
@@ -307,6 +421,50 @@ class _StepsCard extends StatelessWidget {
   String _weekdayLabel(int weekday) {
     const labels = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
     return labels[weekday - 1];
+  }
+
+  String _weekdayFullLabel(int weekday) {
+    const labels = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+    return labels[weekday - 1];
+  }
+}
+
+class _MiniMetric extends StatelessWidget {
+  final String label;
+  final String value;
+  const _MiniMetric({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        Text(label, style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary)),
+      ],
+    );
+  }
+}
+
+class _LegendDot extends StatelessWidget {
+  final Color color;
+  final String label;
+  const _LegendDot({required this.color, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3)),
+        ),
+        const SizedBox(width: 6),
+        Text(label, style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+      ],
+    );
   }
 }
 
