@@ -4,6 +4,10 @@ import 'package:habitos_app_smart_tv/config/app_theme.dart';
 import 'package:habitos_app_smart_tv/presentation/providers/tv_session_provider.dart';
 import 'package:habitos_app_smart_tv/presentation/widgets/tv_focusable.dart';
 import 'package:habitos_app_smart_tv/presentation/screens/tv_dashboard_screen.dart';
+import 'dart:async';
+import 'dart:io';
+
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class TvLoginScreen extends ConsumerStatefulWidget {
   const TvLoginScreen({super.key});
@@ -27,6 +31,9 @@ class _TvLoginScreenState extends ConsumerState<TvLoginScreen> {
       await ref.read(supabaseClientProvider).auth.signInWithPassword(
             email: _emailCtrl.text.trim(),
             password: _passCtrl.text,
+          ).timeout(
+            const Duration(seconds: 12),
+            onTimeout: () => throw const SocketException('timeout'),
           );
       ref.read(tvSessionProvider.notifier).setAuthenticated();
       if (mounted) {
@@ -35,11 +42,32 @@ class _TvLoginScreenState extends ConsumerState<TvLoginScreen> {
           (route) => false,
         );
       }
+    } on AuthException catch (e) {
+      // Error real de credenciales, devuelto por Supabase
+      setState(() => _error = _translateAuthError(e.message));
+    } on SocketException {
+      // Sin conexión a internet o el request no llegó al servidor
+      setState(() => _error = 'Sin conexión a internet. Verifica tu red e intenta de nuevo.');
+    } on TimeoutException {
+      setState(() => _error = 'La conexión tardó demasiado. Verifica tu internet e intenta de nuevo.');
     } catch (_) {
-      setState(() => _error = 'Correo o contraseña incorrectos.');
+      // Cualquier otro error (DNS, certificado, etc.) — tampoco es
+      // culpa de las credenciales, así que no se debe decir eso.
+      setState(() => _error = 'No se pudo conectar al servidor. Verifica tu conexión.');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  String _translateAuthError(String message) {
+    final lower = message.toLowerCase();
+    if (lower.contains('invalid login credentials')) {
+      return 'Correo o contraseña incorrectos.';
+    }
+    if (lower.contains('email not confirmed')) {
+      return 'Debes confirmar tu correo electrónico antes de iniciar sesión.';
+    }
+    return 'Ocurrió un error al iniciar sesión. Intenta de nuevo.';
   }
 
   @override
